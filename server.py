@@ -8,11 +8,12 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("Intervals.icu MCP Proxy")
 
-ATHLETE_ID = os.getenv("INTERVALS_ATHLETE_ID", "i320990")
+ATHLETE_ID = os.getenv("INTERVALS_ATHLETE_ID", "")
 API_KEY = os.getenv(
-    "INTERVALS_API_KEY", "73ywyh0mxd1k9x9i1t2xihy6s"
+    "INTERVALS_API_KEY", ""
 )  # from Intervals settings (Developer Settings)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 BASE_URL = "https://intervals.icu"
 
 
@@ -74,6 +75,63 @@ async def get_events(oldest: str, newest: str) -> dict:
             data = {"raw": r.text}
 
     return {"status": r.status_code, "request": {"params": params}, "data": data}
+
+
+@mcp.tool
+async def create_event(
+    category: str,
+    start_date_local: str,
+    type: str,
+    name: str,
+    description: str = "",
+) -> dict:
+    """
+    Create a planned workout event in Intervals.icu calendar.
+    Example category: WORKOUT
+    Example type: Ride / Run / Swim
+    start_date_local: YYYY-MM-DDTHH:MM:SS (local)
+    discription: optional, must be multi-line
+        Example description:
+            - 15m Z2
+
+            3x
+            - 10m Z4
+            - 5m Z1
+
+            - 10m Z1
+    """
+
+    if not API_KEY:
+        return {"error": "Missing INTERVALS_API_KEY env var"}
+
+    if not DATETIME_RE.match(start_date_local):
+        return {"error": "start_date_local must be YYYY-MM-DDTHH:MM:SS"}
+
+    payload = {
+        "category": category,
+        "start_date_local": start_date_local,
+        "type": type,
+        "name": name,
+        "description": description,
+    }
+
+    url = f"{BASE_URL}/api/v1/athlete/{ATHLETE_ID}/events"
+
+    # Personal API key: Basic Auth (username 'API_KEY', password = API key)
+    auth = ("API_KEY", API_KEY)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.post(url, auth=auth, json=payload)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+    return {
+        "status": r.status_code,
+        "request": {"url": url, "payload": payload},
+        "data": data,
+    }
 
 
 @mcp.tool
