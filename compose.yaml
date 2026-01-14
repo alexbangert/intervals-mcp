@@ -1,0 +1,15 @@
+services:
+  mcp_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intervals-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Port im Container (muss zu deinem server.py passen)
+      - PORT=8000
+    ports:
+      # Port auf dem Host:Port im Container
+      - "8000:8000"
