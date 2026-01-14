@@ -9,12 +9,16 @@ from fastmcp import FastMCP
 mcp = FastMCP("Intervals.icu MCP Proxy")
 
 ATHLETE_ID = os.getenv("INTERVALS_ATHLETE_ID", "")
-API_KEY = os.getenv("INTERVALS_API_KEY", "")  # from Intervals settings (Developer Settings)
+API_KEY = os.getenv(
+    "INTERVALS_API_KEY", ""
+)  # from Intervals settings (Developer Settings)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BASE_URL = "https://intervals.icu"
 
+
 def berlin_today() -> datetime:
     return datetime.now(ZoneInfo("Europe/Berlin"))
+
 
 @mcp.tool
 async def get_last4w_events() -> dict:
@@ -46,6 +50,7 @@ async def get_last4w_events() -> dict:
         "data": data,
     }
 
+
 @mcp.tool
 async def get_events(oldest: str, newest: str) -> dict:
     """
@@ -70,6 +75,34 @@ async def get_events(oldest: str, newest: str) -> dict:
 
     return {"status": r.status_code, "request": {"params": params}, "data": data}
 
+
+@mcp.tool
+async def get_activity(id: str) -> dict:
+    """
+    Fetch Intervals.icu activity by ID.
+    """
+
+    if not API_KEY:
+        return {"error": "Missing INTERVALS_API_KEY env var"}
+
+    url = f"{BASE_URL}/api/v1/activity/{id}"
+    auth = ("API_KEY", API_KEY)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(url, auth=auth)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+    return {"status": r.status_code, "data": data}
+
+
 if __name__ == "__main__":
     # Streamable HTTP endpoint at /mcp
-    mcp.run(transport="http", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), path="/mcp")
+    mcp.run(
+        transport="http",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        path="/mcp",
+    )
