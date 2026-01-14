@@ -101,7 +101,10 @@ async def get_activity(activity_id: str) -> dict:
 @mcp.tool
 async def get_activity_comments(activity_id: str) -> dict:
     """
-    Fetch Intervals.icu activity by ID.
+    Fetch Intervals.icu Comments for a given Activity ID
+
+    Args:
+        activity_id (str): The Activity ID to fetch comments for
     """
 
     if not API_KEY:
