@@ -77,7 +77,7 @@ async def get_events(oldest: str, newest: str) -> dict:
 
 
 @mcp.tool
-async def get_activity(id: str) -> dict:
+async def get_activity(activity_id: str) -> dict:
     """
     Fetch Intervals.icu activity by ID.
     """
@@ -85,7 +85,29 @@ async def get_activity(id: str) -> dict:
     if not API_KEY:
         return {"error": "Missing INTERVALS_API_KEY env var"}
 
-    url = f"{BASE_URL}/api/v1/activity/{id}"
+    url = f"{BASE_URL}/api/v1/activity/{activity_id}"
+    auth = ("API_KEY", API_KEY)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.get(url, auth=auth)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+    return {"status": r.status_code, "data": data}
+
+
+@mcp.tool
+async def get_activity_comments(activity_id: str) -> dict:
+    """
+    Fetch Intervals.icu activity by ID.
+    """
+
+    if not API_KEY:
+        return {"error": "Missing INTERVALS_API_KEY env var"}
+
+    url = f"{BASE_URL}/api/v1/activity/{activity_id}/messages"
     auth = ("API_KEY", API_KEY)
 
     async with httpx.AsyncClient(timeout=20.0) as client:
