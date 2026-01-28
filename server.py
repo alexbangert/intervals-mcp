@@ -41,7 +41,9 @@ def _missing_strava_config() -> list[str]:
 
 async def _refresh_strava_token(client: httpx.AsyncClient) -> dict:
     if not STRAVA_CLIENT_ID or not STRAVA_CLIENT_SECRET or not STRAVA_REFRESH_TOKEN:
-        return {"error": "Missing STRAVA_CLIENT_ID/STRAVA_CLIENT_SECRET/STRAVA_REFRESH_TOKEN"}
+        return {
+            "error": "Missing STRAVA_CLIENT_ID/STRAVA_CLIENT_SECRET/STRAVA_REFRESH_TOKEN"
+        }
 
     payload = {
         "client_id": STRAVA_CLIENT_ID,
@@ -56,7 +58,11 @@ async def _refresh_strava_token(client: httpx.AsyncClient) -> dict:
         data = {"raw": r.text}
 
     if r.status_code >= 400:
-        return {"status": r.status_code, "error": "Failed to refresh Strava token", "data": data}
+        return {
+            "status": r.status_code,
+            "error": "Failed to refresh Strava token",
+            "data": data,
+        }
 
     return {"status": r.status_code, "data": data}
 
@@ -77,12 +83,19 @@ async def _strava_get_activity(activity_id: str) -> dict:
             token = refreshed.get("data", {}).get("access_token", "")
 
         headers = {"Authorization": f"Bearer {token}"}
-        r = await client.get(f"{STRAVA_BASE_URL}/activities/{activity_id}", headers=headers)
+        r = await client.get(
+            f"{STRAVA_BASE_URL}/activities/{activity_id}?include_all_efforts=true",
+            headers=headers,
+        )
 
         if r.status_code == 401 and STRAVA_REFRESH_TOKEN:
             refreshed = await _refresh_strava_token(client)
             if "error" in refreshed:
-                return {"status": r.status_code, "error": "Unauthorized from Strava", "refresh": refreshed}
+                return {
+                    "status": r.status_code,
+                    "error": "Unauthorized from Strava",
+                    "refresh": refreshed,
+                }
             token = refreshed.get("data", {}).get("access_token", "")
             headers = {"Authorization": f"Bearer {token}"}
             r = await client.get(
