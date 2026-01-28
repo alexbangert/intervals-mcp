@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -83,9 +84,11 @@ async def _strava_get_activity(activity_id: str) -> dict:
             token = refreshed.get("data", {}).get("access_token", "")
 
         headers = {"Authorization": f"Bearer {token}"}
+        params = {"include_all_efforts": "true"}
         r = await client.get(
-            f"{STRAVA_BASE_URL}/activities/{activity_id}?include_all_efforts=true",
+            f"{STRAVA_BASE_URL}/activities/{activity_id}",
             headers=headers,
+            params=params,
         )
 
         if r.status_code == 401 and STRAVA_REFRESH_TOKEN:
@@ -99,7 +102,9 @@ async def _strava_get_activity(activity_id: str) -> dict:
             token = refreshed.get("data", {}).get("access_token", "")
             headers = {"Authorization": f"Bearer {token}"}
             r = await client.get(
-                f"{STRAVA_BASE_URL}/activities/{activity_id}", headers=headers
+                f"{STRAVA_BASE_URL}/activities/{activity_id}",
+                headers=headers,
+                params=params,
             )
 
         try:
@@ -107,14 +112,71 @@ async def _strava_get_activity(activity_id: str) -> dict:
         except Exception:
             data = {"raw": r.text}
 
-    response = {"status": r.status_code, "data": data}
-    if refreshed and "data" in refreshed:
-        response["refreshed_token"] = {
-            "access_token": refreshed["data"].get("access_token", ""),
-            "refresh_token": refreshed["data"].get("refresh_token", ""),
-            "expires_at": refreshed["data"].get("expires_at", ""),
-        }
-    return response
+        response = {"status": r.status_code, "data": data}
+        if r.status_code < 300:
+            stream_keys = [
+                "time",
+                "latlng",
+                "heartrate",
+                "velocity_smooth",
+                "cadence",
+                "watts",
+                "altitude",
+                "temp",
+                "grade_smooth",
+            ]
+            s_params = {"keys": ",".join(stream_keys), "key_by_type": "true"}
+            s = await client.get(
+                f"{STRAVA_BASE_URL}/activities/{activity_id}/streams",
+                headers=headers,
+                params=s_params,
+            )
+            try:
+                s_data = s.json()
+            except Exception:
+                s_data = {"raw": s.text}
+            response["streams"] = {"status": s.status_code, "data": s_data}
+
+        if r.status_code < 300:
+            efforts = data.get("segment_efforts", []) if isinstance(data, dict) else []
+            segment_effort_ids = [
+                e.get("id") for e in efforts if isinstance(e, dict) and e.get("id")
+            ]
+            seg_keys = [
+                "time",
+                "distance",
+                "heartrate",
+                "velocity_smooth",
+                "cadence",
+                "watts",
+                "altitude",
+                "grade_smooth",
+            ]
+            seg_params = {"keys": ",".join(seg_keys), "key_by_type": "true"}
+
+            async def _fetch_segment_stream(seg_id: int) -> dict:
+                s = await client.get(
+                    f"{STRAVA_BASE_URL}/segment_efforts/{seg_id}/streams",
+                    headers=headers,
+                    params=seg_params,
+                )
+                try:
+                    s_data = s.json()
+                except Exception:
+                    s_data = {"raw": s.text}
+                return {"id": seg_id, "status": s.status_code, "data": s_data}
+
+            results = await asyncio.gather(
+                *[_fetch_segment_stream(seg_id) for seg_id in segment_effort_ids]
+            )
+            response["segment_streams"] = results
+        if refreshed and "data" in refreshed:
+            response["refreshed_token"] = {
+                "access_token": refreshed["data"].get("access_token", ""),
+                "refresh_token": refreshed["data"].get("refresh_token", ""),
+                "expires_at": refreshed["data"].get("expires_at", ""),
+            }
+        return response
 
 
 @mcp.tool
