@@ -15,10 +15,93 @@ API_KEY = os.getenv(
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 BASE_URL = "https://intervals.icu"
+STRAVA_BASE_URL = "https://www.strava.com/api/v3"
+STRAVA_OAUTH_URL = "https://www.strava.com/oauth/token"
+
+STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET", "")
+STRAVA_ACCESS_TOKEN = os.getenv("STRAVA_ACCESS_TOKEN", "")
+STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN", "")
 
 
 def berlin_today() -> datetime:
     return datetime.now(ZoneInfo("Europe/Berlin"))
+
+
+def _missing_strava_config() -> list[str]:
+    missing = []
+    if not STRAVA_CLIENT_ID:
+        missing.append("STRAVA_CLIENT_ID")
+    if not STRAVA_CLIENT_SECRET:
+        missing.append("STRAVA_CLIENT_SECRET")
+    if not STRAVA_REFRESH_TOKEN and not STRAVA_ACCESS_TOKEN:
+        missing.append("STRAVA_REFRESH_TOKEN or STRAVA_ACCESS_TOKEN")
+    return missing
+
+
+async def _refresh_strava_token(client: httpx.AsyncClient) -> dict:
+    if not STRAVA_CLIENT_ID or not STRAVA_CLIENT_SECRET or not STRAVA_REFRESH_TOKEN:
+        return {"error": "Missing STRAVA_CLIENT_ID/STRAVA_CLIENT_SECRET/STRAVA_REFRESH_TOKEN"}
+
+    payload = {
+        "client_id": STRAVA_CLIENT_ID,
+        "client_secret": STRAVA_CLIENT_SECRET,
+        "refresh_token": STRAVA_REFRESH_TOKEN,
+        "grant_type": "refresh_token",
+    }
+    r = await client.post(STRAVA_OAUTH_URL, data=payload, timeout=20.0)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"raw": r.text}
+
+    if r.status_code >= 400:
+        return {"status": r.status_code, "error": "Failed to refresh Strava token", "data": data}
+
+    return {"status": r.status_code, "data": data}
+
+
+async def _strava_get_activity(activity_id: str) -> dict:
+    missing = _missing_strava_config()
+    if missing:
+        return {"error": f"Missing env vars: {', '.join(missing)}"}
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        token = STRAVA_ACCESS_TOKEN
+        refreshed = None
+
+        if not token and STRAVA_REFRESH_TOKEN:
+            refreshed = await _refresh_strava_token(client)
+            if "error" in refreshed:
+                return refreshed
+            token = refreshed.get("data", {}).get("access_token", "")
+
+        headers = {"Authorization": f"Bearer {token}"}
+        r = await client.get(f"{STRAVA_BASE_URL}/activities/{activity_id}", headers=headers)
+
+        if r.status_code == 401 and STRAVA_REFRESH_TOKEN:
+            refreshed = await _refresh_strava_token(client)
+            if "error" in refreshed:
+                return {"status": r.status_code, "error": "Unauthorized from Strava", "refresh": refreshed}
+            token = refreshed.get("data", {}).get("access_token", "")
+            headers = {"Authorization": f"Bearer {token}"}
+            r = await client.get(
+                f"{STRAVA_BASE_URL}/activities/{activity_id}", headers=headers
+            )
+
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+
+    response = {"status": r.status_code, "data": data}
+    if refreshed and "data" in refreshed:
+        response["refreshed_token"] = {
+            "access_token": refreshed["data"].get("access_token", ""),
+            "refresh_token": refreshed["data"].get("refresh_token", ""),
+            "expires_at": refreshed["data"].get("expires_at", ""),
+        }
+    return response
 
 
 @mcp.tool
@@ -177,6 +260,14 @@ async def get_activity(activity_id: str) -> dict:
             data = r.json()
         except Exception:
             data = {"raw": r.text}
+
+    if (
+        isinstance(data, dict)
+        and data.get("source") == "STRAVA"
+        and data.get("_note") == "STRAVA activities are not available via the API"
+    ):
+        strava = await _strava_get_activity(activity_id)
+        return {"status": r.status_code, "data": data, "strava": strava}
 
     return {"status": r.status_code, "data": data}
 
